@@ -66,7 +66,7 @@ class BatchDeobfuscator:
         if normalized_comm[0:4].lower() == 'set ':
             equal_index = normalized_comm.find('=')
             if equal_index>= 0:
-                self.variables[normalized_comm[4:equal_index]] = normalized_comm[equal_index+1:]
+                self.variables[normalized_comm[4:equal_index].lower()] = normalized_comm[equal_index+1:]
 
 
 
@@ -80,6 +80,7 @@ class BatchDeobfuscator:
             if state == 'init':  # init state
                 if char == '"':   # quote is on
                     state = 'str_s'
+                    normalized_com += char
                 elif char == '^':  # next character must be escaped
                     state = 'escape'
                 elif char == '%':    # variable start
@@ -90,14 +91,16 @@ class BatchDeobfuscator:
             elif state == 'str_s':
                 if char == '"':
                     state = 'init'
+                    normalized_com += char
                 elif char == '%':
                     variable_start = counter
                     state = 'var_s' #seen %
-                normalized_com += char
+                else:
+                    normalized_com += char
             elif state == 'var_s':
                 if char =='%' and counter - variable_start > 1:
                     # print('<substring>{}</substring>'.format(command[variable_start:counter + 1]), end='')
-                    normalized_com += self.get_value(command[variable_start:counter + 1])
+                    normalized_com += self.get_value(command[variable_start:counter + 1].lower())
                     state = 'str_s'
                 elif char =='%':
                     normalized_com += char
@@ -108,7 +111,7 @@ class BatchDeobfuscator:
             elif state == 'init_var_s' :
                 if char =='%' and counter - variable_start > 1:
                     # print('<substring>{}</substring>'.format(command[variable_start:counter + 1]), end='')
-                    normalized_com += self.get_value(command[variable_start:counter + 1])
+                    normalized_com += self.get_value(command[variable_start:counter + 1].lower())
                     state = 'init'
                 elif char =='%':
                     normalized_com += char
