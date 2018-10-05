@@ -1,5 +1,5 @@
 # Introduction
-By using this python script, you can deobfuscate batch scripts that relies on string substitutions and escape characters.
+By using this python script, you can deobfuscate a batch script that is obfuscated with string substitution and escape character techniques.
 
 
 # Running the script
