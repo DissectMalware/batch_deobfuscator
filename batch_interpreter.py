@@ -63,7 +63,7 @@ class BatchDeobfuscator:
 
     def interpret_command(self, normalized_comm):
         normalized_comm = normalized_comm.strip()
-        if normalized_comm.startswith('set '):
+        if normalized_comm[0:4].lower() == 'set ':
             equal_index = normalized_comm.find('=')
             if equal_index>= 0:
                 self.variables[normalized_comm[4:equal_index]] = normalized_comm[equal_index+1:]
