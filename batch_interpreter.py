@@ -59,11 +59,17 @@ class BatchDeobfuscator:
 
 
     def interpret_command(self, normalized_comm):
+
+        # interpreting set command
         normalized_comm = normalized_comm.strip()
-        if normalized_comm[0:4].lower() == 'set ':
-            equal_index = normalized_comm.find('=')
-            if equal_index>= 0:
-                self.variables[normalized_comm[4:equal_index].lower()] = normalized_comm[equal_index+1:]
+        set_command = r"\s*set\s+(?P<var>[A-Za-z0-9#$'()*+,-.?@\[\]_`{}~ ]+)=\s*(?P<val>(\".*\")|\S+)|" \
+                      r"(\s*set\s+/p\s+(?P<input>[A-Za-z0-9#$'()*+,-.?@\[\]_`{}~ ]+)=.*)"
+        matches = re.finditer(set_command, normalized_comm, re.IGNORECASE)
+        for matchNum, match in enumerate(matches):
+            if match.group('input') is not None:
+                self.variables[match.group('input')] = "__input__"
+            else:
+                self.variables[match.group('var').lower()] = match.group('val')
 
 
 
