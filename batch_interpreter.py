@@ -1,10 +1,14 @@
 import re
 import argparse
+import os
 
 class BatchDeobfuscator:
 
     def __init__(self):
         self.variables = {}
+        for env_var, value in os.environ.items():
+            self.variables[env_var.lower()]=value
+
 
     def read_logical_line(self, path):
         with open(path, 'r') as input_file:
@@ -51,7 +55,10 @@ class BatchDeobfuscator:
                     length = int(match.group('length'))
                     value = self.variables.setdefault(variable, '')
                     # TODO: handle negative values
-                    value = value[index: index + length]
+                    if length>=0:
+                        value = value[index: index + length]
+                    else:
+                        value = value[index: length]
                 else:
                     value = self.variables.setdefault(variable, '')
 
