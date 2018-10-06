@@ -36,27 +36,24 @@ class BatchDeobfuscator:
 
 
     def get_value(self, variable):
-        variable = variable[1:-1]
-        colon_index = variable.find(':')
+
+        str_substitution = r"%\s*(?P<variable>[A-Za-z0-9#$'()*+,-.?@\[\]_`{}~ ]+)(:~\s*(?P<index>[+-]?\d+)\s*,\s*(?P<length>[+-]?\d+)\s*)?%"
+
+        matches = re.finditer(str_substitution, variable, re.MULTILINE)
+
         value = ''
-        if colon_index >= 0:
-            variable_name = variable[0:colon_index]
-            comma_index = variable.find(',')
 
-            if comma_index>= 0:
-                index = int(variable[colon_index+2: comma_index])
-                length = int(variable[comma_index+1:])
-            else:
-                index = int(variable[colon_index+2:])
-                length = -1
-
-            value = self.variables.setdefault(variable_name, '')
-
-            value = value[index: index+length]
-
-
-        else:
-            value = self.variables.setdefault(variable, '')
+        for matchNum, match in enumerate(matches):
+            if len(match.groups()) == 4:
+                variable = match.group('variable').lower()
+                if match.group('index') is not None:
+                    index= int(match.group('index'))
+                    length = int(match.group('length'))
+                    value = self.variables.setdefault(variable, '')
+                    # TODO: handle negative values
+                    value = value[index: index + length]
+                else:
+                    value = self.variables.setdefault(variable, '')
 
         return value
 
