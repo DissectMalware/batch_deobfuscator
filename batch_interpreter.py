@@ -213,4 +213,5 @@ if __name__ == "__main__":
         for logical_line in deobfuscator.read_logical_line(args[0].file):
             interpret_logical_line(deobfuscator, logical_line)
     else:
+        print("Please enter an obfuscated batch command:")
         interpret_logical_line(deobfuscator, input())
