@@ -13,7 +13,7 @@ class BatchDeobfuscator:
             self.variables[env_var.lower()] = value
 
     def read_logical_line(self, path):
-        with open(path, 'r') as input_file:
+        with open(path, 'r', encoding='utf-8') as input_file:
             logical_line = ''
             for line in input_file:
                 if not line.endswith('^'):
