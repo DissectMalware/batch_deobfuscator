@@ -78,11 +78,11 @@ class BatchDeobfuscator:
     def interpret_command(self, normalized_comm):
 
         normalized_comm = normalized_comm.strip()
-        #remove paranthesis
+        # remove paranthesis
 
         index = 0
-        last = len(normalized_comm) -1
-        while index < last and (normalized_comm[index] == ' ' or normalized_comm[index] == '(' ):
+        last = len(normalized_comm) - 1
+        while index < last and (normalized_comm[index] == ' ' or normalized_comm[index] == '('):
             if normalized_comm[index] == '(':
                 while last > index and (normalized_comm[last] == ' ' or normalized_comm[last] == ')'):
                     if normalized_comm[last] == ')':
@@ -90,7 +90,7 @@ class BatchDeobfuscator:
                         break
                     last -= 1
             index += 1
-        normalized_comm = normalized_comm[index:last+1]
+        normalized_comm = normalized_comm[index:last + 1]
 
         if normalized_comm.lower().startswith('cmd'):
             set_command = r"\s*(call)?cmd(.exe)?\s*((\/A|\/U|\/Q|\/D)\s+|((\/E|\/F|\/V):(ON|OFF))\s*)*(\/c|\/r)\s*(?P<cmd>.*)"
@@ -101,8 +101,8 @@ class BatchDeobfuscator:
 
         else:
             # interpreting set command
-            set_command = r"(\s*(call)?\s*set\s+(?P<var>[A-Za-z0-9#$'()*+,-.?@\[\]_`{}~ ]+)=\s*(?P<val>.*))|" \
-                          r"(\s*(call)?\s*set\s+/p\s+(?P<input>[A-Za-z0-9#$'()*+,-.?@\[\]_`{}~ ]+)=.*)"
+            set_command = r"(\s*(call)?\s*set\s+\"?(?P<var>[A-Za-z0-9#$'()*+,-.?@\[\]_`{}~ ]+)=\s*(?P<val>[^\"\n]*)\"?)|" \
+                          r"(\s*(call)?\s*set\s+/p\s+\"?(?P<input>[A-Za-z0-9#$'()*+,-.?@\[\]_`{}~ ]+)=[^\"\n]*\"?)"
             match = re.search(set_command, normalized_comm, re.IGNORECASE)
             if match is not None:
                 if match.group('input') is not None:
@@ -136,6 +136,11 @@ class BatchDeobfuscator:
                     normalized_com += '%'
                     stack.append('init')
                     state = 'var_s'
+                elif char == '!':
+                    variable_start = len(normalized_com)
+                    normalized_com += '%'
+                    stack.append('init')
+                    state = 'var_s_2'
                 else:
                     normalized_com += char
             elif state == 'str_s':
@@ -147,6 +152,11 @@ class BatchDeobfuscator:
                     normalized_com += '%'
                     stack.append('str_s')
                     state = 'var_s'  # seen %
+                elif char == '!':
+                    variable_start = len(normalized_com)
+                    normalized_com += '%'
+                    stack.append('str_s')
+                    state = 'var_s_2'  # seen !
                 elif char == '^':
                     state = 'escape'
                     stack.append('str_s')
@@ -175,6 +185,29 @@ class BatchDeobfuscator:
                     stack.append('var_s')
                 else:
                     normalized_com += char
+            elif state == 'var_s_2':
+                if char == '!' and normalized_com[-1] != '%':
+                    normalized_com += '%'
+                    # print('<substring>{}</substring>'.format(command[variable_start:counter + 1]), end='')
+                    value = self.get_value(normalized_com[variable_start:].lower())
+                    normalized_com = normalized_com[:variable_start]
+                    normalized_com += value
+                    state = stack.pop()
+                elif char == '!':
+                    normalized_com += char
+                    variable_start = counter
+                elif char == '"':
+                    if stack[-1] == 'str_s':
+                        normalized_com += char
+                        stack.pop()
+                        state = 'init'
+                    else:
+                        normalized_com += char
+                elif char == '^':
+                    state = 'escape'
+                    stack.append('var_s')
+                else:
+                    normalized_com += char
             elif state == 'escape':
                 normalized_com += char
                 state = stack.pop()
@@ -188,14 +221,14 @@ def interpret_logical_line(deobfuscator, logical_line, tab=''):
     for command in commands:
         normalized_comm = deobfuscator.normalize_command(command)
         deobfuscator.interpret_command(normalized_comm)
-        print(tab+normalized_comm)
+        print(tab + normalized_comm)
         if len(deobfuscator.exec_cmd) > 0:
-            print(tab+"[CHILE CMD]")
+            print(tab + "[CHILE CMD]")
             for child_cmd in deobfuscator.exec_cmd:
                 child_deobfuscator = copy.deepcopy(deobfuscator)
                 child_deobfuscator.exec_cmd.clear()
-                interpret_logical_line(child_deobfuscator, child_cmd, tab=tab+'\t')
-            print(tab+"[END OF CHILE CMD]")
+                interpret_logical_line(child_deobfuscator, child_cmd, tab=tab + '\t')
+            print(tab + "[END OF CHILE CMD]")
 
 
 if __name__ == "__main__":
@@ -208,7 +241,6 @@ if __name__ == "__main__":
     if args[0].file is not None:
 
         file_path = args[0].file
-
 
         for logical_line in deobfuscator.read_logical_line(args[0].file):
             interpret_logical_line(deobfuscator, logical_line)
