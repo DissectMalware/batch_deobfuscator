@@ -1,7 +1,9 @@
-import re
 import argparse
-import os
 import copy
+import os
+import re
+
+QUOTED_CHARS = ["|", ">", "<", '"', "^"]
 
 
 class BatchDeobfuscator:
@@ -22,6 +24,7 @@ class BatchDeobfuscator:
                 "computername": "MISCREANTTEARS",
                 "comspec": "C:\\WINDOWS\\system32\\cmd.exe",
                 "driverdata": "C:\\Windows\\System32\\Drivers\\DriverData",
+                "errorlevel": "0",  # Because nothing fails.
                 "fps_browser_app_profile_string": "Internet Explorer",
                 "fps_browser_user_profile_string": "Default",
                 "homedrive": "C:",
@@ -68,6 +71,39 @@ class BatchDeobfuscator:
                 else:
                     logical_line += line + "\n"
 
+    def split_if_statement(self, statement):
+        if_statement = r"(?P<conditional>(?P<if_statement>if)\s+(not\s+)?(?P<type>errorlevel\s+\d+\s+|exist\s+(\".*\"|[^\s]+)\s+|.+?==.+?\s+|(\/i\s+)?[^\s]+\s+(equ|neq|lss|leq|gtr|geq)\s+[^\s]+\s+|cmdextversion\s+\d\s+|defined\s+[^\s]+\s+)(?P<open_paren>\()?)(?P<true_statement>[^\)]*)(?P<close_paren>\))?(\s+else\s+(\()?\s*(?P<false_statement>[^\)]*)(\))?)?"
+        match = re.search(if_statement, statement, re.IGNORECASE)
+        if match is not None:
+            conditional = match.group("conditional")
+            if match.group("open_paren") is None:
+                conditional = f"{conditional}("
+            yield conditional
+            yield match.group("true_statement")
+            if match.group("false_statement") is None:
+                if match.group("open_paren") is None or match.group("close_paren") is not None:
+                    yield ")"
+            else:
+                # Got an ELSE statement
+                if match.group("if_statement") == "if":
+                    yield ") else ("
+                else:
+                    yield ") ELSE ("
+                yield match.group("false_statement")
+                yield ")"
+        else:
+            # Broken if statement, maybe a re-run
+            yield statement
+
+    def get_commands_special_statement(self, statement):
+        if statement.lower().startswith("if "):
+            for part in self.split_if_statement(statement):
+                if part.strip() != "":
+                    yield part
+        # Potential for adding the for statement at some point
+        else:
+            yield statement
+
     def get_commands(self, logical_line):
         state = "init"
         counter = 0
@@ -78,8 +114,14 @@ class BatchDeobfuscator:
                     state = "str_s"
                 elif char == "^":
                     state = "escape"
+                elif char == "&" and logical_line[counter - 1] == ">":
+                    # Usually an output redirection, we want to keep it on the same line
+                    pass
                 elif char == "&" or char == "|":
-                    yield logical_line[start_command:counter].strip()
+                    cmd = logical_line[start_command:counter].strip()
+                    if cmd != "":
+                        for part in self.get_commands_special_statement(cmd):
+                            yield part
                     start_command = counter + 1
             elif state == "str_s":
                 if char == '"':
@@ -91,11 +133,15 @@ class BatchDeobfuscator:
 
         last_com = logical_line[start_command:].strip()
         if last_com != "":
-            yield last_com
+            for part in self.get_commands_special_statement(last_com):
+                yield part
 
     def get_value(self, variable):
 
-        str_substitution = r"%\s*(?P<variable>[A-Za-z0-9#$'()*+,-.?@\[\]_`{}~ ]+)" r"(:~\s*(?P<index>[+-]?\d+)\s*,\s*(?P<length>[+-]?\d+)\s*)?%"
+        str_substitution = (
+            r"%(?P<variable>[\"^|A-Za-z0-9#$'()*+,-.?@\[\]_`{}~ ]+)"
+            r"(:~\s*(?P<index>[+-]?\d+)\s*,\s*(?P<length>[+-]?\d+)\s*)?%"
+        )
 
         matches = re.finditer(str_substitution, variable, re.MULTILINE)
 
@@ -120,8 +166,100 @@ class BatchDeobfuscator:
 
         return value
 
+    def interpret_set(self, cmd):
+        state = "init"
+        option = None
+        var_name = ""
+        var_value = ""
+        quote = None
+        old_state = None
+        stop_parsing = len(cmd)
+
+        for idx, char in enumerate(cmd):
+            if idx >= stop_parsing:
+                break
+            if state == "init":
+                if char == " ":
+                    continue
+                elif char == "/":
+                    state = "option"
+                elif char == '"':
+                    quote = '"'
+                    stop_parsing = cmd.rfind('"')
+                    if idx == stop_parsing:
+                        stop_parsing = len(cmd)
+                    state = "var"
+                elif char == "^":
+                    old_state = state
+                    state = "escape"
+                else:
+                    state = "var"
+                    var_name += char
+            elif state == "option":
+                option = char.lower()
+                state = "init"
+            elif state == "var":
+                if char == "=":
+                    state = "value"
+                elif not quote and char == '"':
+                    quote = '"'
+                    var_name += char
+                elif char == "^":
+                    old_state = state
+                    state = "escape"
+                else:
+                    var_name += char
+            elif state == "value":
+                if char == "^":
+                    old_state = state
+                    state = "escape"
+                else:
+                    var_value += char
+            elif state == "escape":
+                if old_state == "init":
+                    if char == '"':
+                        quote = '^"'
+                        stop_parsing = cmd.rfind('"')
+                        if idx == stop_parsing:
+                            stop_parsing = len(cmd)
+                        state = "init"
+                        old_state = None
+                    else:
+                        state = "var"
+                        var_name += char
+                        old_state = None
+                elif old_state == "var":
+                    if quote == '"' and char in QUOTED_CHARS:
+                        var_name += "^"
+                    if not quote and char == '"':
+                        quote = '^"'
+                    var_name += char
+                    state = old_state
+                    old_state = None
+                elif old_state == "value":
+                    if char != "^":
+                        var_value += char
+                    state = old_state
+                    old_state = None
+
+        if option == "a":
+            var_name = var_name.strip(" ")
+            for char in QUOTED_CHARS:
+                var_name = var_name.replace(char, "")
+            var_value = f"({var_value.strip(' ')})"
+        elif option == "p":
+            var_value = "__input__"
+
+        var_name = var_name.lstrip(" ")
+        if not quote:
+            var_name = var_name.lstrip('^"').replace('^"', '"')
+
+        return (var_name, var_value)
+
     def interpret_command(self, normalized_comm):
-        normalized_comm = normalized_comm.strip()
+        # We need to keep the last space in case the command is "set EXP=43 " so that the value will be "43 "
+        # normalized_comm = normalized_comm.strip()
+
         # remove paranthesis
         index = 0
         last = len(normalized_comm) - 1
@@ -136,7 +274,9 @@ class BatchDeobfuscator:
         normalized_comm = normalized_comm[index : last + 1]
 
         if normalized_comm.lower().startswith("cmd"):
-            set_command = r"\s*(call)?cmd(.exe)?\s*((\/A|\/U|\/Q|\/D)\s+|((\/E|\/F|\/V):(ON|OFF))\s*)*(\/c|\/r)\s*(?P<cmd>.*)"
+            set_command = (
+                r"\s*(call)?cmd(.exe)?\s*((\/A|\/U|\/Q|\/D)\s+|((\/E|\/F|\/V):(ON|OFF))\s*)*(\/c|\/r)\s*(?P<cmd>.*)"
+            )
             match = re.search(set_command, normalized_comm, re.IGNORECASE)
             if match is not None and match.group("cmd") is not None:
                 cmd = match.group("cmd").strip('"')
@@ -144,16 +284,15 @@ class BatchDeobfuscator:
 
         else:
             # interpreting set command
-            set_command = (
-                r"(\s*(call)?\s*set\s+\"?(?P<var>[A-Za-z0-9#$'()*+,-.?@\[\]_`{}~ ]+)=\s*(?P<val>[^\"\n]*)\"?)|"
-                r"(\s*(call)?\s*set\s+/p\s+\"?(?P<input>[A-Za-z0-9#$'()*+,-.?@\[\]_`{}~ ]+)=[^\"\n]*\"?)"
-            )
+            set_command = r"\s*(call)?\s*set(?P<cmd>(\s|\/).*)"
             match = re.search(set_command, normalized_comm, re.IGNORECASE)
             if match is not None:
-                if match.group("input") is not None:
-                    self.variables[match.group("input")] = "__input__"
+                var_name, var_value = self.interpret_set(match.group("cmd"))
+                if var_value == "":
+                    if var_name.lower() in self.variables:
+                        del self.variables[var_name.lower()]
                 else:
-                    self.variables[match.group("var").lower()] = match.group("val")
+                    self.variables[var_name.lower()] = var_value
 
     # pushdown automata
     def normalize_command(self, command):
@@ -214,9 +353,10 @@ class BatchDeobfuscator:
                     normalized_com = normalized_com[:variable_start]
                     normalized_com += value
                     state = stack.pop()
-                elif char == "%":
+                elif char == "%":  # Two % in a row
                     normalized_com += char
                     variable_start = counter
+                    state = stack.pop()
                 elif char == '"':
                     if stack[-1] == "str_s":
                         normalized_com += char
@@ -225,8 +365,10 @@ class BatchDeobfuscator:
                     else:
                         normalized_com += char
                 elif char == "^":
-                    state = "escape"
-                    stack.append("var_s")
+                    # Do not escape in vars?
+                    # state = "escape"
+                    # stack.append("var_s")
+                    normalized_com += char
                 else:
                     normalized_com += char
             elif state == "var_s_2":
@@ -253,11 +395,14 @@ class BatchDeobfuscator:
                 else:
                     normalized_com += char
             elif state == "escape":
+                if char in QUOTED_CHARS:
+                    normalized_com += "^"
                 normalized_com += char
                 state = stack.pop()
 
             counter += 1
-        return normalized_com
+
+        return normalized_com.strip(" ")
 
 
 def interpret_logical_line(deobfuscator, logical_line, tab=""):
@@ -267,12 +412,12 @@ def interpret_logical_line(deobfuscator, logical_line, tab=""):
         deobfuscator.interpret_command(normalized_comm)
         print(tab + normalized_comm)
         if len(deobfuscator.exec_cmd) > 0:
-            print(tab + "[CHILE CMD]")
+            print(tab + "[CHILD CMD]")
             for child_cmd in deobfuscator.exec_cmd:
                 child_deobfuscator = copy.deepcopy(deobfuscator)
                 child_deobfuscator.exec_cmd.clear()
                 interpret_logical_line(child_deobfuscator, child_cmd, tab=tab + "\t")
-            print(tab + "[END OF CHILE CMD]")
+            print(tab + "[END OF CHILD CMD]")
 
 
 def interpret_logical_line_str(deobfuscator, logical_line, tab=""):
@@ -283,12 +428,12 @@ def interpret_logical_line_str(deobfuscator, logical_line, tab=""):
         deobfuscator.interpret_command(normalized_comm)
         str = str + tab + normalized_comm
         if len(deobfuscator.exec_cmd) > 0:
-            str = str + tab + "[CHILE CMD]"
+            str = str + tab + "[CHILD CMD]"
             for child_cmd in deobfuscator.exec_cmd:
                 child_deobfuscator = copy.deepcopy(deobfuscator)
                 child_deobfuscator.exec_cmd.clear()
                 interpret_logical_line(child_deobfuscator, child_cmd, tab=tab + "\t")
-            str = str + tab + "[END OF CHILE CMD]"
+            str = str + tab + "[END OF CHILD CMD]"
     return str
 
 
