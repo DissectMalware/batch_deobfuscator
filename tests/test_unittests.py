@@ -206,6 +206,15 @@ class TestUnittests:
             # TODO: Really, how should we handle that?
             # 'set /p "EXP "=What is'
             # 'set /p "E^"XP =What is'
+            # What about some weird echo statement now?
+            ("set EXP=43", "echo %EXP%", "echo 43"),
+            ("set EXP=43", "echo !EXP!", "echo 43"),
+            ("set EXP=43", "echo ^%EXP%", "echo 43"),
+            ("set EXP=43", "echo ^!EXP!", "echo 43"),
+            # ("set EXP=43", "echo ^%EX^P%", "echo 43"),  # That's wrong... it actually prints the next line. Ignoring.
+            ("set EXP=43", "echo ^!EX^P!", "echo 43"),
+            # ("set EXP=43", "echo ^%EXP^%", "echo 43"),  # That's wrong... it actually prints the next line. Ignoring.
+            ("set EXP=43", "echo ^!EXP^!", "echo 43"),
         ],
     )
     def test_sample6(var, echo, result):

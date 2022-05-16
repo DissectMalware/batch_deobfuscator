@@ -61,7 +61,7 @@ class BatchDeobfuscator:
             }
 
     def read_logical_line(self, path):
-        with open(path, "r", encoding="utf-8") as input_file:
+        with open(path, "r", encoding="utf-8", errors="ignore") as input_file:
             logical_line = ""
             for line in input_file:
                 if not line.endswith("^"):
@@ -139,8 +139,11 @@ class BatchDeobfuscator:
     def get_value(self, variable):
 
         str_substitution = (
-            r"%(?P<variable>[\"^|A-Za-z0-9#$'()*+,-.?@\[\]_`{}~ ]+)"
-            r"(:~\s*(?P<index>[+-]?\d+)\s*,\s*(?P<length>[+-]?\d+)\s*)?%"
+            r"([%!])(?P<variable>[\"^|!A-Za-z0-9#$'()*+,-.?@\[\]_`{}~\s+]+)"
+            r"("
+            r"(:~\s*(?P<index>[+-]?\d+)\s*(?:,\s*(?P<length>[+-]?\d+))?\s*)|"
+            r"(:(?P<s1>[^=]+)=(?P<s2>[^=]*))"
+            r")?(\1)"
         )
 
         matches = re.finditer(str_substitution, variable, re.MULTILINE)
@@ -148,21 +151,34 @@ class BatchDeobfuscator:
         value = ""
 
         for matchNum, match in enumerate(matches):
-            if len(match.groups()) == 4:
-                var_name = match.group("variable").lower()
-                if var_name in self.variables:
-                    value = self.variables[var_name]
-                    if match.group("index") is not None:
-                        index = int(match.group("index"))
+            var_name = match.group("variable").lower()
+            if var_name in self.variables:
+                value = self.variables[var_name]
+                if match.group("index") is not None:
+                    index = int(match.group("index"))
+                    if index < 0 and -index >= len(value):
+                        index = 0
+                    elif index < 0:
+                        index = len(value) + index
+                    if match.group("length") is not None:
                         length = int(match.group("length"))
-                        if length >= 0:
-                            value = value[index : index + length]
-                        else:
-                            value = value[index:length]
-                else:
-                    # if variable name is not set, return the variable
-                    # value = variable
-                    return value
+                    else:
+                        length = len(value) - index
+                    if length >= 0:
+                        value = value[index : index + length]
+                    else:
+                        value = value[index:length]
+                elif match.group("s1") is not None:
+                    s1 = match.group("s1")
+                    s2 = match.group("s2")
+                    if s1.startswith("*") and s1[1:].lower() in value.lower():
+                        value = f"{s2}{value[value.lower().index(s1[1:].lower())+len(s1)-1:]}"
+                    else:
+                        pattern = re.compile(re.escape(s1), re.IGNORECASE)
+                        value = pattern.sub(s2, value)
+            else:
+                # It should be "variable", and interpret the empty echo later, but that would need a better simulator
+                return value
 
         return value
 
@@ -305,24 +321,24 @@ class BatchDeobfuscator:
                 if char == '"':  # quote is on
                     state = "str_s"
                     normalized_com += char
-                elif char == "," or char == ";" or char == "\t":
+                elif char == "," or char == ";":  # or char == "\t": EDIT: How about we keep those tabs?
                     # commas (",") are replaced by spaces, unless they are part of a string in doublequotes
                     # semicolons (";") are replaced by spaces, unless they are part of a string in doublequotes
                     # tabs are replaced by a single space
                     # http://www.robvanderwoude.com/parameters.php
                     normalized_com += " "
                 elif char == "^":  # next character must be escaped
+                    stack.append(state)
                     state = "escape"
-                    stack.append("init")
                 elif char == "%":  # variable start
                     variable_start = len(normalized_com)
-                    normalized_com += "%"
-                    stack.append("init")
+                    normalized_com += char
+                    stack.append(state)
                     state = "var_s"
                 elif char == "!":
                     variable_start = len(normalized_com)
-                    normalized_com += "%"
-                    stack.append("init")
+                    normalized_com += char
+                    stack.append(state)
                     state = "var_s_2"
                 else:
                     normalized_com += char
@@ -332,12 +348,12 @@ class BatchDeobfuscator:
                     normalized_com += char
                 elif char == "%":
                     variable_start = len(normalized_com)
-                    normalized_com += "%"
+                    normalized_com += char
                     stack.append("str_s")
                     state = "var_s"  # seen %
                 elif char == "!":
                     variable_start = len(normalized_com)
-                    normalized_com += "%"
+                    normalized_com += char
                     stack.append("str_s")
                     state = "var_s_2"  # seen !
                 elif char == "^":
@@ -346,10 +362,9 @@ class BatchDeobfuscator:
                 else:
                     normalized_com += char
             elif state == "var_s":
-                if char == "%" and normalized_com[-1] != "%":
-                    normalized_com += "%"
-                    # print('<substring>{}</substring>'.format(command[variable_start:counter + 1]), end='')
-                    value = self.get_value(normalized_com[variable_start:].lower())
+                if char == "%" and normalized_com[-1] != char:
+                    normalized_com += char
+                    value = self.get_value(normalized_com[variable_start:])
                     normalized_com = normalized_com[:variable_start]
                     normalized_com += value
                     state = stack.pop()
@@ -372,10 +387,9 @@ class BatchDeobfuscator:
                 else:
                     normalized_com += char
             elif state == "var_s_2":
-                if char == "!" and normalized_com[-1] != "%":
-                    normalized_com += "%"
-                    # print('<substring>{}</substring>'.format(command[variable_start:counter + 1]), end='')
-                    value = self.get_value(normalized_com[variable_start:].lower())
+                if char == "!" and normalized_com[-1] != char:
+                    normalized_com += char
+                    value = self.get_value(normalized_com[variable_start:])
                     normalized_com = normalized_com[:variable_start]
                     normalized_com += value
                     state = stack.pop()
@@ -391,7 +405,7 @@ class BatchDeobfuscator:
                         normalized_com += char
                 elif char == "^":
                     state = "escape"
-                    stack.append("var_s")
+                    stack.append("var_s_2")
                 else:
                     normalized_com += char
             elif state == "escape":
@@ -399,6 +413,26 @@ class BatchDeobfuscator:
                     normalized_com += "^"
                 normalized_com += char
                 state = stack.pop()
+                if char == "%":
+                    if state == "var_s":
+                        value = self.get_value(normalized_com[variable_start:])
+                        normalized_com = normalized_com[:variable_start]
+                        normalized_com += value
+                        state = stack.pop()
+                    else:
+                        variable_start = len(normalized_com) - 1
+                        stack.append(state)
+                        state = "var_s"
+                elif char == "!":
+                    if state == "var_s_2":
+                        value = self.get_value(normalized_com[variable_start:])
+                        normalized_com = normalized_com[:variable_start]
+                        normalized_com += value
+                        state = stack.pop()
+                    else:
+                        variable_start = len(normalized_com) - 1
+                        stack.append(state)
+                        state = "var_s_2"
 
             counter += 1
 
