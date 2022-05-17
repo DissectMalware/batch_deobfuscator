@@ -3,7 +3,7 @@ import copy
 import os
 import re
 
-QUOTED_CHARS = ["|", ">", "<", '"', "^"]
+QUOTED_CHARS = ["|", ">", "<", '"', "^", "&"]
 
 
 class BatchDeobfuscator:
@@ -109,6 +109,7 @@ class BatchDeobfuscator:
         counter = 0
         start_command = 0
         for char in logical_line:
+            # print(f"C:{char}, S:{state}")
             if state == "init":  # init state
                 if char == '"':  # quote is on
                     state = "str_s"
@@ -139,7 +140,7 @@ class BatchDeobfuscator:
     def get_value(self, variable):
 
         str_substitution = (
-            r"([%!])(?P<variable>[\"^|!A-Za-z0-9#$'()*+,-.?@\[\]_`{}~\s+]+)"
+            r"([%!])(?P<variable>[\"^|!\w#$'()*+,-.?@\[\]_`{}~\s+]+)"
             r"("
             r"(:~\s*(?P<index>[+-]?\d+)\s*(?:,\s*(?P<length>[+-]?\d+))?\s*)|"
             r"(:(?P<s1>[^=]+)=(?P<s2>[^=]*))"
@@ -180,7 +181,9 @@ class BatchDeobfuscator:
                 # It should be "variable", and interpret the empty echo later, but that would need a better simulator
                 return value
 
-        return value
+        if value == "^":
+            return value
+        return value.rstrip("^")
 
     def interpret_set(self, cmd):
         state = "init"
@@ -192,6 +195,7 @@ class BatchDeobfuscator:
         stop_parsing = len(cmd)
 
         for idx, char in enumerate(cmd):
+            # print(f"{idx}. C: {char} S: {state}, {var_value}")
             if idx >= stop_parsing:
                 break
             if state == "init":
@@ -253,8 +257,7 @@ class BatchDeobfuscator:
                     state = old_state
                     old_state = None
                 elif old_state == "value":
-                    if char != "^":
-                        var_value += char
+                    var_value += char
                     state = old_state
                     old_state = None
 
@@ -313,10 +316,10 @@ class BatchDeobfuscator:
     # pushdown automata
     def normalize_command(self, command):
         state = "init"
-        counter = 0
         normalized_com = ""
         stack = []
         for char in command:
+            # print(f"C:{char} S:{state} N:{normalized_com}")
             if state == "init":  # init state
                 if char == '"':  # quote is on
                     state = "str_s"
@@ -366,11 +369,10 @@ class BatchDeobfuscator:
                     normalized_com += char
                     value = self.get_value(normalized_com[variable_start:])
                     normalized_com = normalized_com[:variable_start]
-                    normalized_com += value
+                    normalized_com += self.normalize_command(value)
                     state = stack.pop()
                 elif char == "%":  # Two % in a row
                     normalized_com += char
-                    variable_start = counter
                     state = stack.pop()
                 elif char == '"':
                     if stack[-1] == "str_s":
@@ -384,6 +386,15 @@ class BatchDeobfuscator:
                     # state = "escape"
                     # stack.append("var_s")
                     normalized_com += char
+                elif char.isdigit() and len(normalized_com) == variable_start + 1:
+                    normalized_com += char
+                    if char == "0":
+                        value = "script.bat"
+                    else:
+                        value = ""  # Assume no parameter were passed
+                    normalized_com = normalized_com[:variable_start]
+                    normalized_com += value
+                    state = stack.pop()
                 else:
                     normalized_com += char
             elif state == "var_s_2":
@@ -391,11 +402,10 @@ class BatchDeobfuscator:
                     normalized_com += char
                     value = self.get_value(normalized_com[variable_start:])
                     normalized_com = normalized_com[:variable_start]
-                    normalized_com += value
+                    normalized_com += self.normalize_command(value)
                     state = stack.pop()
                 elif char == "!":
                     normalized_com += char
-                    variable_start = counter
                 elif char == '"':
                     if stack[-1] == "str_s":
                         normalized_com += char
@@ -417,7 +427,7 @@ class BatchDeobfuscator:
                     if state == "var_s":
                         value = self.get_value(normalized_com[variable_start:])
                         normalized_com = normalized_com[:variable_start]
-                        normalized_com += value
+                        normalized_com += self.normalize_command(value)
                         state = stack.pop()
                     else:
                         variable_start = len(normalized_com) - 1
@@ -427,16 +437,19 @@ class BatchDeobfuscator:
                     if state == "var_s_2":
                         value = self.get_value(normalized_com[variable_start:])
                         normalized_com = normalized_com[:variable_start]
-                        normalized_com += value
+                        normalized_com += self.normalize_command(value)
                         state = stack.pop()
                     else:
                         variable_start = len(normalized_com) - 1
                         stack.append(state)
                         state = "var_s_2"
 
-            counter += 1
+        if state in ["var_s", "var_s_2"]:
+            normalized_com = normalized_com[:variable_start] + normalized_com[variable_start + 1 :]
+        if state == "escape":
+            normalized_com += "^"
 
-        return normalized_com.strip(" ")
+        return normalized_com
 
 
 def interpret_logical_line(deobfuscator, logical_line, tab=""):

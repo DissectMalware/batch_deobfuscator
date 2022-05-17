@@ -10,7 +10,10 @@ class TestUnittests:
     @pytest.mark.parametrize(
         "logical_line, result",
         [
-            (",;,cmd.exe,;,/c,;,echo;Command 1&&echo,Command 2", ["cmd.exe   /c   echo Command 1", "echo Command 2"]),
+            (
+                ",;,cmd.exe,;,/c,;,echo;Command 1&&echo,Command 2",
+                ["   cmd.exe   /c   echo Command 1", "echo Command 2"],
+            ),
         ],
     )
     def test_comma_semi_colon(logical_line, result):
@@ -81,7 +84,7 @@ class TestUnittests:
                     "set tf=hell",
                     "set fa=pow",
                     "set dq=C:\\WINDOWS\\System32\\Windowspowershell\\v1.0\\powershell",
-                    "echo hostname;",
+                    "echo hostname; ^",
                     "C:\\WINDOWS\\System32\\Windowspowershell\\v1.0\\powershell -nop -",
                 ],
             )
@@ -169,7 +172,7 @@ class TestUnittests:
     def test_FOR_execution(logical_line):
         """
         This resolves to starting powershell and calling hostname:
-        FOR /F "delims=s\ tokens=4" %%a IN ('set^|findstr PSM') DO %%a hostname
+        FOR /F "delims=s\\ tokens=4" %%a IN ('set^|findstr PSM') DO %%a hostname
 
         You can also get string manipulation out of the "assoc" or "ftype" command to build out the word "powershell"
         """
