@@ -464,6 +464,7 @@ def interpret_logical_line(deobfuscator, logical_line, tab=""):
                 child_deobfuscator = copy.deepcopy(deobfuscator)
                 child_deobfuscator.exec_cmd.clear()
                 interpret_logical_line(child_deobfuscator, child_cmd, tab=tab + "\t")
+            deobfuscator.exec_cmd.clear()
             print(tab + "[END OF CHILD CMD]")
 
 
@@ -480,6 +481,7 @@ def interpret_logical_line_str(deobfuscator, logical_line, tab=""):
                 child_deobfuscator = copy.deepcopy(deobfuscator)
                 child_deobfuscator.exec_cmd.clear()
                 interpret_logical_line(child_deobfuscator, child_cmd, tab=tab + "\t")
+            deobfuscator.exec_cmd.clear()
             str = str + tab + "[END OF CHILD CMD]"
     return str
 
