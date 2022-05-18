@@ -140,7 +140,7 @@ class BatchDeobfuscator:
     def get_value(self, variable):
 
         str_substitution = (
-            r"([%!])(?P<variable>[\"^|!\w#$'()*+,-.?@\[\]_`{}~\s+]+)"
+            r"([%!])(?P<variable>[\"^|!\w#$'()*+,-.?@\[\]`{}~\s+]+)"
             r"("
             r"(:~\s*(?P<index>[+-]?\d+)\s*(?:,\s*(?P<length>[+-]?\d+))?\s*)|"
             r"(:(?P<s1>[^=]+)=(?P<s2>[^=]*))"

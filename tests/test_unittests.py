@@ -120,6 +120,7 @@ class TestUnittests:
             ('set "EXP=43^"3"', "echo *%EXP%*", 'echo *43"3*'),
             ('set EXP=43^"^|', "echo *%EXP%*", 'echo *43"|*'),
             # Getting into really weird stuff
+            ("set EXP=4=3", "echo *%EXP%*", "echo *4=3*"),
             ('set ""EXP=43"', 'echo *%"EXP%*', "echo *43*"),
             ('set ""EXP=4"3', 'echo *%"EXP%*', "echo *4*"),
             ('set """EXP=43"', "echo *%EXP%*", "echo **"),
