@@ -35,7 +35,13 @@ class BatchDeobfuscator:
                 "number_of_processors": "4",
                 "onedrive": "C:\\Users\\puncher\\OneDrive",
                 "os": "Windows_NT",
-                "path": "C:\\Program Files\\Amazon Corretto\\jdk11.0.7_10\\bin;C:\\WINDOWS\\system32;C:\\WINDOWS;C:\\WINDOWS\\System32\\Wbem;C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\;C:\\Program Files\\dotnet\\;C:\\Program Files\\Microsoft SQL Server\\130\\Tools\\Binn\\;C:\\Users\\puncher\\AppData\\Local\\Microsoft\\WindowsApps;%USERPROFILE%\\AppData\\Local\\Microsoft\\WindowsApps;",
+                "path": (
+                    "C:\\Program Files\\Amazon Corretto\\jdk11.0.7_10\\bin;C:\\WINDOWS\\system32;"
+                    "C:\\WINDOWS;C:\\WINDOWS\\System32\\Wbem;C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\;"
+                    "C:\\Program Files\\dotnet\\;C:\\Program Files\\Microsoft SQL Server\\130\\Tools\\Binn\\;"
+                    "C:\\Users\\puncher\\AppData\\Local\\Microsoft\\WindowsApps;"
+                    "%USERPROFILE%\\AppData\\Local\\Microsoft\\WindowsApps;"
+                ),
                 "pathext": ".COM;.EXE;.BAT;.CMD;.VBS;.VBE;.JS;.JSE;.WSF;.WSH;.MSC",
                 "processor_architecture": "AMD64",
                 "processor_identifier": "Intel Core Ti-83 Family 6 Model 158 Stepping 10, GenuineIntel",
@@ -72,7 +78,13 @@ class BatchDeobfuscator:
                     logical_line += line + "\n"
 
     def split_if_statement(self, statement):
-        if_statement = r"(?P<conditional>(?P<if_statement>if)\s+(not\s+)?(?P<type>errorlevel\s+\d+\s+|exist\s+(\".*\"|[^\s]+)\s+|.+?==.+?\s+|(\/i\s+)?[^\s]+\s+(equ|neq|lss|leq|gtr|geq)\s+[^\s]+\s+|cmdextversion\s+\d\s+|defined\s+[^\s]+\s+)(?P<open_paren>\()?)(?P<true_statement>[^\)]*)(?P<close_paren>\))?(\s+else\s+(\()?\s*(?P<false_statement>[^\)]*)(\))?)?"
+        if_statement = (
+            r"(?P<conditional>(?P<if_statement>if)\s+(not\s+)?"
+            r"(?P<type>errorlevel\s+\d+\s+|exist\s+(\".*\"|[^\s]+)\s+|.+?==.+?\s+|"
+            r"(\/i\s+)?[^\s]+\s+(equ|neq|lss|leq|gtr|geq)\s+[^\s]+\s+|cmdextversion\s+\d\s+|defined\s+[^\s]+\s+)"
+            r"(?P<open_paren>\()?)(?P<true_statement>[^\)]*)(?P<close_paren>\))?"
+            r"(\s+else\s+(\()?\s*(?P<false_statement>[^\)]*)(\))?)?"
+        )
         match = re.search(if_statement, statement, re.IGNORECASE)
         if match is not None:
             conditional = match.group("conditional")
