@@ -2,6 +2,7 @@ import argparse
 import copy
 import os
 import re
+from collections import defaultdict
 
 QUOTED_CHARS = ["|", ">", "<", '"', "^", "&"]
 
@@ -10,6 +11,7 @@ class BatchDeobfuscator:
     def __init__(self):
         self.variables = {}
         self.exec_cmd = []
+        self.traits = defaultdict(lambda: list())
         if os.name == "nt":
             for env_var, value in os.environ.items():
                 self.variables[env_var.lower()] = value
@@ -330,6 +332,7 @@ class BatchDeobfuscator:
         state = "init"
         normalized_com = ""
         stack = []
+        traits = {"start_with_var": False, "var_used": 0}
         for char in command:
             # print(f"C:{char} S:{state} N:{normalized_com}")
             if state == "init":  # init state
@@ -346,11 +349,15 @@ class BatchDeobfuscator:
                     stack.append(state)
                     state = "escape"
                 elif char == "%":  # variable start
+                    if len(normalized_com) == 0:
+                        traits["start_with_var"] = True
                     variable_start = len(normalized_com)
                     normalized_com += char
                     stack.append(state)
                     state = "var_s"
                 elif char == "!":
+                    if len(normalized_com) == 0:
+                        traits["start_with_var"] = True
                     variable_start = len(normalized_com)
                     normalized_com += char
                     stack.append(state)
@@ -382,6 +389,7 @@ class BatchDeobfuscator:
                     value = self.get_value(normalized_com[variable_start:])
                     normalized_com = normalized_com[:variable_start]
                     normalized_com += self.normalize_command(value)
+                    traits["var_used"] += 1
                     state = stack.pop()
                 elif char == "%":  # Two % in a row
                     normalized_com += char
@@ -415,6 +423,7 @@ class BatchDeobfuscator:
                     value = self.get_value(normalized_com[variable_start:])
                     normalized_com = normalized_com[:variable_start]
                     normalized_com += self.normalize_command(value)
+                    traits["var_used"] += 1
                     state = stack.pop()
                 elif char == "!":
                     normalized_com += char
@@ -440,6 +449,7 @@ class BatchDeobfuscator:
                         value = self.get_value(normalized_com[variable_start:])
                         normalized_com = normalized_com[:variable_start]
                         normalized_com += self.normalize_command(value)
+                        traits["var_used"] += 1
                         state = stack.pop()
                     else:
                         variable_start = len(normalized_com) - 1
@@ -450,6 +460,7 @@ class BatchDeobfuscator:
                         value = self.get_value(normalized_com[variable_start:])
                         normalized_com = normalized_com[:variable_start]
                         normalized_com += self.normalize_command(value)
+                        traits["var_used"] += 1
                         state = stack.pop()
                     else:
                         variable_start = len(normalized_com) - 1
@@ -460,6 +471,10 @@ class BatchDeobfuscator:
             normalized_com = normalized_com[:variable_start] + normalized_com[variable_start + 1 :]
         if state == "escape":
             normalized_com += "^"
+
+        if traits["start_with_var"]:
+            self.traits["start_with_var"].append((command, normalized_com))
+        self.traits["var_used"].append((command, normalized_com, traits["var_used"]))
 
         return normalized_com
 
