@@ -290,6 +290,9 @@ class BatchDeobfuscator:
         return (var_name, var_value)
 
     def interpret_command(self, normalized_comm):
+        if normalized_comm[:3].lower() == "rem":
+            return
+
         # We need to keep the last space in case the command is "set EXP=43 " so that the value will be "43 "
         # normalized_comm = normalized_comm.strip()
 
@@ -329,6 +332,9 @@ class BatchDeobfuscator:
 
     # pushdown automata
     def normalize_command(self, command):
+        if command[:3].lower() == "rem":
+            return command
+
         state = "init"
         normalized_com = ""
         stack = []

@@ -5,14 +5,14 @@ from batch_deobfuscator.batch_interpreter import BatchDeobfuscator
 
 class TestUnittests:
     @staticmethod
-    def test_sample1():
+    def test_simple_set():
         deobfuscator = BatchDeobfuscator()
         deobfuscator.interpret_command("set WALLET=43DTEF92be6XcPj5Z7U")
         res = deobfuscator.normalize_command("echo %WALLET%")
         assert res == "echo 43DTEF92be6XcPj5Z7U"
 
     @staticmethod
-    def test_sample2():
+    def test_variable_in_for():
         deobfuscator = BatchDeobfuscator()
         deobfuscator.interpret_command("set WALLET=43DTEF92be6XcPj5Z7U")
         cmd = 'for /f "delims=." %%a in ("%WALLET%") do set WALLET_BASE=%%a'
@@ -20,14 +20,14 @@ class TestUnittests:
         assert res == 'for /f "delims=." %%a in ("43DTEF92be6XcPj5Z7U") do set WALLET_BASE=%%a'
 
     @staticmethod
-    def test_sample3():
+    def test_unset_variable():
         deobfuscator = BatchDeobfuscator()
         cmd = "echo ERROR: Wrong wallet address length (should be 106 or 95): %WALLET_BASE_LEN%"
         res = deobfuscator.normalize_command(cmd)
         assert res == "echo ERROR: Wrong wallet address length (should be 106 or 95): "
 
     @staticmethod
-    def test_sample4():
+    def test_caret_pipe():
         deobfuscator = BatchDeobfuscator()
         cmd1 = 'echo tasklist /fi "imagename eq jin.exe" ^| find ":" ^>NUL\n'
         cmd2 = [x for x in deobfuscator.get_commands(cmd1)]
@@ -38,7 +38,7 @@ class TestUnittests:
         assert cmd4 == ['echo tasklist /fi "imagename eq jin.exe" ^| find ":" ^>NUL']
 
     @staticmethod
-    def test_sample5():
+    def test_simple_set_a():
         deobfuscator = BatchDeobfuscator()
         res = deobfuscator.normalize_command("echo %NUMBER_OF_PROCESSORS%")
         assert res == "echo 4"
@@ -218,14 +218,14 @@ class TestUnittests:
             ("set EXP=43", "echo ^!EXP^!", "echo 43"),
         ],
     )
-    def test_sample6(var, echo, result):
+    def test_set_command(var, echo, result):
         deobfuscator = BatchDeobfuscator()
         deobfuscator.interpret_command(var)
         res = deobfuscator.normalize_command(echo)
         assert res == result
 
     @staticmethod
-    def test_sample7():
+    def test_clear_variable_with_set():
         # If you specify only a variable and an equal sign (without <string>) for the set command,
         # the <string> value associated with the variable is cleared (as if the variable is not there).
         deobfuscator = BatchDeobfuscator()
@@ -310,12 +310,12 @@ class TestUnittests:
             ),
         ],
     )
-    def test_sample_8(statement, commands):
+    def test_if_statements(statement, commands):
         deobfuscator = BatchDeobfuscator()
         assert [x for x in deobfuscator.get_commands(statement)] == commands
 
     @staticmethod
-    def test_sample_9():
+    def test_single_quote_var_name_rewrite_1():
         deobfuscator = BatchDeobfuscator()
 
         cmd = "%os:~-4,1%%comspec:~-1,1%%comspec:~14,1%%commonprogramfiles:~-6,1%'=^^^1^^^\\^^^)%comspec:~-13,1%u^^^,^^^%pathext:~31,1%b^^^8%commonprogramfiles:~9,1%^^^^^^^/v^^^&^^^U%os:~-9,1%^^^%pathext:~6,1%k%programfiles:~-12,1%p^^^[^^^*^^^@^^^~%programfiles:~-8,1%^^^%pathext:~11,1%q%comspec:~-14,1%^^^%commonprogramfiles:~24,1%^^^R^^^%pathext:~12,1%^^^0f^^^I^^^%comspec:~-9,1%^^^{^^^$%comspec:~-7,1%^^^K%programfiles:~-2,1%^^^7^^^9z%commonprogramfiles:~-11,1%^^^G^^^%os:~9,1%^^^L^^^=^^^(%commonprogramfiles:~-16,1%^^^%commonprogramfiles:~-12,1%h%comspec:~-15,1%^^^6^^^%commonprogramfiles:~10,1%^^^\"^^^Q^^^_^^^%pathext:~2,1%j^^^`%commonprogramfiles:~6,1%^^^Y^^^]^^^+^^^%pathext:~18,1%^^^-^^^%pathext:~26,1%^^^|^^^%comspec:~17,1%^^^%pathext:~7,1%^^^<%commonprogramfiles:~22,1%^^^%pathext:~17,1%^^^;^^^%os:~-10,1%^^^%os:~8,1%^^^%pathext:~41,1%^^^>^^^}^^^#^^^'%os:~-7,1%^^^.^^^5%os:~5,1%^^^4^^^:^^^%programfiles:~3,1%^^^%pathext:~47,1%%comspec:~25,1%^^^?^^^Z"  # noqa: E501
@@ -366,7 +366,7 @@ class TestUnittests:
         assert res == "echo script.bat123"
 
     @staticmethod
-    def test_sample_10():
+    def test_single_quote_var_name_rewrite_2():
         # Taken from 8d20c8a8104f29e7ec2ff158103fa73d3e9d357b646e2ff0487b880ab6462643
         deobfuscator = BatchDeobfuscator()
 
@@ -383,7 +383,7 @@ class TestUnittests:
         assert deobfuscator.variables["'"].endswith("^N^F^*")
 
     @staticmethod
-    def test_sample_11():
+    def test_special_char_var_name():
         cmd = '@set "ò=BbQw2 1zUta9gCFolxZSYMRJ8jE6ITy7V@md3K0XDkvWr5PN4uecHqpLnOisAfGh"'
         deobfuscator = BatchDeobfuscator()
         cmd2 = deobfuscator.normalize_command(cmd)
@@ -392,3 +392,23 @@ class TestUnittests:
         cmd = "%ò:~33,1%%ò:~50,1%%ò:~51,1%%ò:~63,1%%ò:~15,1%%ò:~5,1%%ò:~15,1%%ò:~61,1%%ò:~61,1%"
         cmd2 = deobfuscator.normalize_command(cmd)
         assert cmd2 == "@echo off"
+
+    @staticmethod
+    def test_rem_skip():
+        deobfuscator = BatchDeobfuscator()
+
+        cmd = "set EXP=value"
+        cmd2 = deobfuscator.normalize_command(cmd)
+        deobfuscator.interpret_command(cmd2)
+
+        cmd = "echo *%EXP%*"
+        cmd2 = deobfuscator.normalize_command(cmd)
+        deobfuscator.interpret_command(cmd2)
+
+        assert cmd2 == "echo *value*"
+
+        cmd = "REM echo *%EXP%*"
+        cmd2 = deobfuscator.normalize_command(cmd)
+        deobfuscator.interpret_command(cmd2)
+
+        assert cmd2 == cmd
