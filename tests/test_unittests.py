@@ -412,3 +412,40 @@ class TestUnittests:
         deobfuscator.interpret_command(cmd2)
 
         assert cmd2 == cmd
+
+    @staticmethod
+    def test_fun_var_replace():
+        deobfuscator = BatchDeobfuscator()
+
+        cmd = "%comspec%"
+        cmd2 = deobfuscator.normalize_command(cmd)
+        assert cmd2 == "C:\\WINDOWS\\system32\\cmd.exe"
+
+        cmd = "%comspec:cmd=powershell%"
+        cmd2 = deobfuscator.normalize_command(cmd)
+        assert cmd2 == "C:\\WINDOWS\\system32\\powershell.exe"
+
+    @staticmethod
+    @pytest.mark.skip()
+    def test_bobbystacksmash():
+        # TODO: Improve deobfuscation
+        # Some examples taken from https://github.com/bobbystacksmash/CMD-DeObfuscator
+        deobfuscator = BatchDeobfuscator()
+
+        # Empty string removal
+        # https://github.com/bobbystacksmash/CMD-DeObfuscator#empty-string-removal
+        cmd = 'pow""ersh""ell'
+        cmd2 = deobfuscator.normalize_command(cmd)
+        assert cmd2 == "powershell"
+
+        # String widening
+        # https://github.com/bobbystacksmash/CMD-DeObfuscator#string-widening
+        cmd = 'w"s"c"r"i"p"t'
+        cmd2 = deobfuscator.normalize_command(cmd)
+        assert cmd2 == "wscript"
+
+        # Path resolver
+        # https://github.com/bobbystacksmash/CMD-DeObfuscator#path-resolver-coming-soon
+        cmd = "C:\\foo\\bar\\baz\\..\\..\\..\Windows\System32\cmd.exe"
+        cmd2 = deobfuscator.normalize_command(cmd)
+        assert cmd2 == "C:\\Windows\\System32\\cmd.exe"
