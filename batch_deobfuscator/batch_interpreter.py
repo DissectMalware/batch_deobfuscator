@@ -336,8 +336,8 @@ class BatchDeobfuscator:
         return (var_name, var_value)
 
     def interpret_curl(self, cmd):
-        cmd = shlex.split(cmd, posix=False)
-        args, unknown = self.curl_parser.parse_known_args(cmd[1:])
+        split_cmd = shlex.split(cmd, posix=False)
+        args, unknown = self.curl_parser.parse_known_args(split_cmd[1:])
 
         dst = args.output
         if args.remote_name:
