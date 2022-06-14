@@ -446,6 +446,34 @@ class TestUnittests:
 
         # Path resolver
         # https://github.com/bobbystacksmash/CMD-DeObfuscator#path-resolver-coming-soon
-        cmd = "C:\\foo\\bar\\baz\\..\\..\\..\Windows\System32\cmd.exe"
+        cmd = "C:\\foo\\bar\\baz\\..\\..\\..\\Windows\\System32\\cmd.exe"
         cmd2 = deobfuscator.normalize_command(cmd)
         assert cmd2 == "C:\\Windows\\System32\\cmd.exe"
+
+    @staticmethod
+    def test_for():
+        deobfuscator = BatchDeobfuscator()
+        cmd = "for /l %%x in (1, 1, 10) do echo %%x"
+        cmd2 = list(deobfuscator.get_commands(cmd))
+        assert len(cmd2) == 3
+        assert cmd2 == ["for /l %%x in (1, 1, 10) do (", "echo %%x", ")"]
+
+    @staticmethod
+    @pytest.mark.parametrize(
+        "cmd, download_trait",
+        [
+            (
+                "curl.exe -LO https://www.7-zip.org/a/7z1805-x64.exe",
+                {"src": "https://www.7-zip.org/a/7z1805-x64.exe", "dst": "7z1805-x64.exe"},
+            ),
+            (
+                "curl.exe -o C:\\ProgramData\\output\\output.file 1.1.1.1/file.dat",
+                {"src": "1.1.1.1/file.dat", "dst": "C:\\ProgramData\\output\\output.file"},
+            ),
+        ],
+    )
+    def test_interpret_curl(cmd, download_trait):
+        deobfuscator = BatchDeobfuscator()
+        deobfuscator.interpret_curl(cmd)
+        assert len(deobfuscator.traits["download"]) == 1
+        assert deobfuscator.traits["download"][-1][1] == download_trait

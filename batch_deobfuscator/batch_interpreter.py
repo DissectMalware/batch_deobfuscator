@@ -2,7 +2,10 @@ import argparse
 import copy
 import os
 import re
+import shlex
+import string
 from collections import defaultdict
+from urllib.parse import urlparse
 
 QUOTED_CHARS = ["|", ">", "<", '"', "^", "&"]
 
@@ -55,6 +58,7 @@ class BatchDeobfuscator:
                 "programw6432": "C:\\Program Files",
                 "psmodulepath": "C:\\WINDOWS\\system32\\WindowsPowerShell\\v1.0\\Modules\\",
                 "public": "C:\\Users\\Public",
+                "random": "4",  # https://xkcd.com/221/
                 "sessionname": "Console",
                 "systemdrive": "C:",
                 "systemroot": "C:\\WINDOWS",
@@ -67,6 +71,24 @@ class BatchDeobfuscator:
                 "windir": "C:\\WINDOWS",
                 "__compat_layer": "DetectorsMessageBoxErrors",
             }
+
+        # There are 211 lines coming out of curl --help, so I won't be parsing all the options
+        self.curl_parser = argparse.ArgumentParser()
+        self.curl_parser.add_argument("-o", "--output", dest="output", help="Write to file instead of stdout")
+        self.curl_parser.add_argument(
+            "-O",
+            "--remote-name",
+            dest="remote_name",
+            action="store_true",
+            help="Write output to a file named as the remote file",
+        )
+        self.curl_parser.add_argument("url", help="URL")
+        # Patch all possible one-character arguments
+        for char in string.ascii_letters + string.digits + "#:":
+            try:
+                self.curl_parser.add_argument(f"-{char}", action="store_true")
+            except argparse.ArgumentError:
+                pass
 
     def read_logical_line(self, path):
         with open(path, "r", encoding="utf-8", errors="ignore") as input_file:
@@ -106,7 +128,28 @@ class BatchDeobfuscator:
                 yield match.group("false_statement")
                 yield ")"
         else:
-            # Broken if statement, maybe a re-run
+            # Broken statement, maybe a re-run
+            yield statement
+
+    def split_for_statement(self, statement):
+        for_statement = (
+            r"(?P<loop>(?P<for_statement>for)\s+"
+            r"(?P<parameter>.+)"
+            r"\s+IN\s+\((?P<in_set>[^\)]+)\)"
+            r"\s+DO\s+"
+            r"(?P<open_paren>\()?)(?P<command>[^\)]*)(?P<close_paren>\))?"
+        )
+        match = re.search(for_statement, statement, re.IGNORECASE)
+        if match is not None:
+            loop = match.group("loop")
+            if match.group("open_paren") is None:
+                loop = f"{loop}("
+            yield loop
+            yield match.group("command")
+            if match.group("open_paren") is None or match.group("close_paren") is not None:
+                yield ")"
+        else:
+            # Broken statement, maybe a re-run
             yield statement
 
     def get_commands_special_statement(self, statement):
@@ -114,7 +157,10 @@ class BatchDeobfuscator:
             for part in self.split_if_statement(statement):
                 if part.strip() != "":
                     yield part
-        # Potential for adding the for statement at some point
+        elif statement.lower().startswith("for "):
+            for part in self.split_for_statement(statement):
+                if part.strip() != "":
+                    yield part
         else:
             yield statement
 
@@ -289,6 +335,16 @@ class BatchDeobfuscator:
 
         return (var_name, var_value)
 
+    def interpret_curl(self, cmd):
+        cmd = shlex.split(cmd, posix=False)
+        args, unknown = self.curl_parser.parse_known_args(cmd[1:])
+
+        dst = args.output
+        if args.remote_name:
+            dst = os.path.basename(urlparse(args.url).path)
+
+        self.traits["download"].append((cmd, {"src": args.url, "dst": dst}))
+
     def interpret_command(self, normalized_comm):
         if normalized_comm[:3].lower() == "rem":
             return
@@ -309,26 +365,41 @@ class BatchDeobfuscator:
             index += 1
         normalized_comm = normalized_comm[index : last + 1]
 
+        if not normalized_comm:
+            return
+
+        if normalized_comm[0] == "@":
+            normalized_comm = normalized_comm[1:]
+
+        if normalized_comm.lower().startswith("call"):
+            # TODO: Not a perfect interpretation as the @ sign of the recursive command shouldn't be remove
+            # This shouldn't work:
+            # call @set EXP=43
+            # But this should:
+            # call set EXP=43
+            self.interpret_command(normalized_comm[5:])
+            return
+
         if normalized_comm.lower().startswith("cmd"):
-            set_command = (
-                r"\s*(call)?cmd(.exe)?\s*((\/A|\/U|\/Q|\/D)\s+|((\/E|\/F|\/V):(ON|OFF))\s*)*(\/c|\/r)\s*(?P<cmd>.*)"
-            )
-            match = re.search(set_command, normalized_comm, re.IGNORECASE)
+            cmd_command = r"cmd(.exe)?\s*((\/A|\/U|\/Q|\/D)\s+|((\/E|\/F|\/V):(ON|OFF))\s*)*(\/c|\/r)\s*(?P<cmd>.*)"
+            match = re.search(cmd_command, normalized_comm, re.IGNORECASE)
             if match is not None and match.group("cmd") is not None:
                 cmd = match.group("cmd").strip('"')
                 self.exec_cmd.append(cmd)
+            return
 
-        else:
+        if normalized_comm.lower().startswith("set"):
             # interpreting set command
-            set_command = r"\s*(call)?\s*set(?P<cmd>(\s|\/).*)"
-            match = re.search(set_command, normalized_comm, re.IGNORECASE)
-            if match is not None:
-                var_name, var_value = self.interpret_set(match.group("cmd"))
-                if var_value == "":
-                    if var_name.lower() in self.variables:
-                        del self.variables[var_name.lower()]
-                else:
-                    self.variables[var_name.lower()] = var_value
+            var_name, var_value = self.interpret_set(normalized_comm[3:])
+            if var_value == "":
+                if var_name.lower() in self.variables:
+                    del self.variables[var_name.lower()]
+            else:
+                self.variables[var_name.lower()] = var_value
+            return
+
+        if normalized_comm.lower().startswith("curl"):
+            self.interpret_curl(normalized_comm)
 
     # pushdown automata
     def normalize_command(self, command):
