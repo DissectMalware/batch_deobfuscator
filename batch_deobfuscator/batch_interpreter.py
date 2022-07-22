@@ -415,7 +415,10 @@ class BatchDeobfuscator:
             if state == "init":  # init state
                 if char == '"':  # quote is on
                     state = "str_s"
-                    normalized_com += char
+                    if normalized_com and normalized_com[-1] == '"':
+                        normalized_com = normalized_com[:-1]
+                    else:
+                        normalized_com += char
                 elif char == "," or char == ";":  # or char == "\t": EDIT: How about we keep those tabs?
                     # commas (",") are replaced by spaces, unless they are part of a string in doublequotes
                     # semicolons (";") are replaced by spaces, unless they are part of a string in doublequotes
