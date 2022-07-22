@@ -477,3 +477,9 @@ class TestUnittests:
         deobfuscator.interpret_curl(cmd)
         assert len(deobfuscator.traits["download"]) == 1
         assert deobfuscator.traits["download"][-1][1] == download_trait
+
+    @staticmethod
+    def test_double_double_quote_stripping():
+        deobfuscator = BatchDeobfuscator()
+        cmd = deobfuscator.normalize_command('cmd /C "pow""ershell -e ZQBjAGgAbwAgACIAVwBpAHoAYQByAGQAIgA="')
+        assert cmd == 'cmd /C "powershell -e ZQBjAGgAbwAgACIAVwBpAHoAYQByAGQAIgA="'
