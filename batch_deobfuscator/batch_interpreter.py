@@ -1,20 +1,53 @@
 import argparse
+import base64
 import copy
+import hashlib
 import os
 import re
 import shlex
+import shutil
 import string
+import tempfile
 from collections import defaultdict
 from urllib.parse import urlparse
 
 QUOTED_CHARS = ["|", ">", "<", '"', "^", "&"]
 
+# Powershell detection
+ENC_RE = rb"(?i)(?:-|/)e(?:c|n(?:c(?:o(?:d(?:e(?:d(?:c(?:o(?:m(?:m(?:a(?:nd?)?)?)?)?)?)?)?)?)?)?)?)?$"
+PWR_CMD_RE = rb"(?i)(?:-|/)c(?:o(?:m(?:m(?:a(?:nd?)?)?)?)?)?$"
+
+# Gathered from https://gist.github.com/api0cradle/8cdc53e2a80de079709d28a2d96458c2
+RARE_LOLBAS = [
+    "forfiles",
+    "bash",
+    "scriptrunner",
+    "syncappvpublishingserver",
+    "hh.exe",
+    "msbuild",
+    "regsvcs",
+    "regasm",
+    "installutil",
+    "ieexec",
+    "msxsl",
+    "odbcconf",
+    "sqldumper",
+    "pcalua",
+    "appvlp",
+    "runscripthelper",
+    "infdefaultinstall",
+    "diskshadow",
+    "msdt",
+    "regsvr32",
+]
+
 
 class BatchDeobfuscator:
-    def __init__(self):
+    def __init__(self, complex_one_liner_threshold=4):
         self.variables = {}
         self.exec_cmd = []
         self.traits = defaultdict(lambda: list())
+        self.complex_one_liner_threshold = complex_one_liner_threshold
         if os.name == "nt":
             for env_var, value in os.environ.items():
                 self.variables[env_var.lower()] = value
@@ -561,6 +594,108 @@ class BatchDeobfuscator:
         self.traits["var_used"].append((command, normalized_com, traits["var_used"]))
 
         return normalized_com
+
+    def search_for_powershell(self, normalized_comm, working_directory, extracted_files):
+        if "powershell" in normalized_comm.lower():
+            try:
+                ori_cmd = shlex.split(normalized_comm)
+                cmd = shlex.split(normalized_comm.lower())
+            except ValueError:
+                return
+            pws_idx = None
+            if "powershell" in cmd:
+                pws_idx = cmd.index("powershell")
+            elif "powershell.exe" in cmd:
+                pws_idx = cmd.index("powershell.exe")
+            if pws_idx is None:
+                return
+            cmd = cmd[pws_idx:]
+
+            ps1_cmd = None
+            for idx, part in enumerate(cmd):
+                if re.match(ENC_RE, part.encode()):
+                    ps1_cmd = base64.b64decode(ori_cmd[pws_idx + idx + 1]).replace(b"\x00", b"")
+                    break
+                elif re.match(PWR_CMD_RE, part.encode()):
+                    ps1_cmd = ori_cmd[pws_idx + idx + 1].encode()
+                    break
+
+            if ps1_cmd:
+                sha256hash = hashlib.sha256(ps1_cmd).hexdigest()
+                for _, extracted_file_hash in extracted_files.get("powershell", []):
+                    if sha256hash == extracted_file_hash:
+                        return
+                powershell_filename = f"{sha256hash[0:10]}.ps1"
+                powershell_file_path = os.path.join(working_directory, powershell_filename)
+                with open(powershell_file_path, "wb") as f:
+                    f.write(ps1_cmd)
+                extracted_files["powershell"].append((powershell_filename, sha256hash))
+
+    def analyze_logical_line(self, logical_line, working_directory, f, extracted_files):
+        commands = self.get_commands(logical_line)
+        for command in commands:
+            normalized_comm = self.normalize_command(command)
+            if len(list(self.get_commands(normalized_comm))) > 1:
+                self.traits["command-grouping"].append({"Command": command[:100], "Normalized": normalized_comm[:100]})
+                self.analyze_logical_line(normalized_comm, working_directory, f, extracted_files)
+            else:
+                self.interpret_command(normalized_comm)
+                f.write(normalized_comm)
+                f.write("\n")
+                for lolbas in RARE_LOLBAS:
+                    if lolbas in normalized_comm:
+                        self.traits["LOLBAS"].append({"LOLBAS": lolbas, "Command": normalized_comm[:100]})
+                self.search_for_powershell(normalized_comm, working_directory, extracted_files)
+                if len(self.exec_cmd) > 0:
+                    for child_cmd in self.exec_cmd:
+                        child_deobfuscator = copy.deepcopy(self)
+                        child_deobfuscator.exec_cmd.clear()
+                        child_fd, child_path = tempfile.mkstemp(suffix=".bat", prefix="child_", dir=working_directory)
+                        with open(child_path, "w") as child_f:
+                            child_deobfuscator.analyze_logical_line(
+                                child_cmd, working_directory, child_f, extracted_files
+                            )
+                        with open(child_path, "rb") as f:
+                            sha256hash = hashlib.sha256(f.read()).hexdigest()
+                        bat_filename = f"{sha256hash[0:10]}.bat"
+                        shutil.move(child_path, os.path.join(working_directory, bat_filename))
+                        extracted_files["batch"].append((bat_filename, sha256hash))
+                    self.exec_cmd.clear()
+
+    def analyze(self, file_path, working_directory):
+        extracted_files = defaultdict(lambda: list())
+
+        file_name = "deobfuscated_bat.bat"
+        temp_path = os.path.join(working_directory, file_name)
+        with open(temp_path, "w") as f:
+            for logical_line in self.read_logical_line(file_path):
+                self.analyze_logical_line(logical_line, working_directory, f, extracted_files)
+
+        # Figure out if we're dealing with a Complex One-Liner
+        # Ignore empty lines to determine if it is a One-Liner
+        self.traits["one-liner"] = False
+        with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
+            firstline = False
+            for line in f:
+                if line.strip():
+                    if not firstline:
+                        self.traits["one-liner"] = True
+                        firstline = True
+                    else:
+                        self.traits["one-liner"] = False
+                        break
+
+        with open(temp_path, "rb") as f:
+            deobfuscated_data = f.read()
+            if self.traits["one-liner"]:
+                resulting_line_count = deobfuscated_data.count(b"\n")
+                if resulting_line_count >= self.complex_one_liner_threshold:
+                    self.traits["complex-one-liner"] = resulting_line_count
+            sha256hash = hashlib.sha256(deobfuscated_data).hexdigest()
+            bat_filename = f"{sha256hash[0:10]}_deobfuscated.bat"
+            shutil.move(temp_path, os.path.join(working_directory, bat_filename))
+
+        return bat_filename, extracted_files
 
 
 def interpret_logical_line(deobfuscator, logical_line, tab=""):
