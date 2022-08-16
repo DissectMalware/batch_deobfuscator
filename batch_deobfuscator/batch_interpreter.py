@@ -46,6 +46,7 @@ class BatchDeobfuscator:
     def __init__(self, complex_one_liner_threshold=4):
         self.variables = {}
         self.exec_cmd = []
+        self.exec_ps1 = []
         self.traits = defaultdict(lambda: list())
         self.complex_one_liner_threshold = complex_one_liner_threshold
         if os.name == "nt":
@@ -378,6 +379,27 @@ class BatchDeobfuscator:
 
         self.traits["download"].append((cmd, {"src": args.url, "dst": dst}))
 
+    def interpret_powershell(self, normalized_comm):
+        try:
+            ori_cmd = shlex.split(normalized_comm)
+            cmd = shlex.split(normalized_comm.lower())
+        except ValueError:
+            return
+
+        ps1_cmd = None
+        for idx, part in enumerate(cmd):
+            if re.match(ENC_RE, part.encode()):
+                ps1_cmd = base64.b64decode(ori_cmd[idx + 1]).replace(b"\x00", b"")
+                break
+            elif re.match(PWR_CMD_RE, part.encode()):
+                ps1_cmd = ori_cmd[idx + 1].encode()
+                break
+        if ps1_cmd is None:
+            ps1_cmd = ori_cmd[-1].encode()
+
+        if ps1_cmd:
+            self.exec_ps1.append(ps1_cmd.strip(b'"'))
+
     def interpret_command(self, normalized_comm):
         if normalized_comm[:3].lower() == "rem":
             return
@@ -404,7 +426,8 @@ class BatchDeobfuscator:
         if normalized_comm[0] == "@":
             normalized_comm = normalized_comm[1:]
 
-        if normalized_comm.lower().startswith("call"):
+        normalized_comm_lower = normalized_comm.lower()
+        if normalized_comm_lower.startswith("call"):
             # TODO: Not a perfect interpretation as the @ sign of the recursive command shouldn't be remove
             # This shouldn't work:
             # call @set EXP=43
@@ -413,15 +436,27 @@ class BatchDeobfuscator:
             self.interpret_command(normalized_comm[5:])
             return
 
-        if normalized_comm.lower().startswith("cmd"):
+        if normalized_comm_lower.startswith("start"):
+            start_re = (
+                r"start(.exe)?"
+                r"(\/min|\/max|\/wait|\/low|\/normal|\/abovenormal|\/belownormal|\/high|\/realtime|\/b|\/i|\/w|\s+)*"
+                # TODO: Add Node + Affinity options
+                # TODO: Add title + path keys
+                r"(?P<cmd>.*)"
+            )
+            match = re.match(start_re, normalized_comm, re.IGNORECASE)
+            if match is not None and match.group("cmd") is not None:
+                self.interpret_command(match.group("cmd"))
+            return
+
+        if normalized_comm_lower.startswith("cmd"):
             cmd_command = r"cmd(.exe)?\s*((\/A|\/U|\/Q|\/D)\s+|((\/E|\/F|\/V):(ON|OFF))\s*)*(\/c|\/r)\s*(?P<cmd>.*)"
             match = re.search(cmd_command, normalized_comm, re.IGNORECASE)
             if match is not None and match.group("cmd") is not None:
-                cmd = match.group("cmd").strip('"')
-                self.exec_cmd.append(cmd)
+                self.exec_cmd.append(match.group("cmd").strip('"'))
             return
 
-        if normalized_comm.lower().startswith("set"):
+        if normalized_comm_lower.startswith("set"):
             # interpreting set command
             var_name, var_value = self.interpret_set(normalized_comm[3:])
             if var_value == "":
@@ -431,8 +466,11 @@ class BatchDeobfuscator:
                 self.variables[var_name.lower()] = var_value
             return
 
-        if normalized_comm.lower().startswith("curl"):
+        if normalized_comm_lower.startswith("curl"):
             self.interpret_curl(normalized_comm)
+
+        if normalized_comm_lower.startswith("powershell"):
+            self.interpret_powershell(normalized_comm)
 
     # pushdown automata
     def normalize_command(self, command):
@@ -595,48 +633,12 @@ class BatchDeobfuscator:
 
         return normalized_com
 
-    def search_for_powershell(self, normalized_comm, working_directory, extracted_files):
-        if "powershell" in normalized_comm.lower():
-            try:
-                ori_cmd = shlex.split(normalized_comm)
-                cmd = shlex.split(normalized_comm.lower())
-            except ValueError:
-                return
-            pws_idx = None
-            if "powershell" in cmd:
-                pws_idx = cmd.index("powershell")
-            elif "powershell.exe" in cmd:
-                pws_idx = cmd.index("powershell.exe")
-            if pws_idx is None:
-                return
-            cmd = cmd[pws_idx:]
-
-            ps1_cmd = None
-            for idx, part in enumerate(cmd):
-                if re.match(ENC_RE, part.encode()):
-                    ps1_cmd = base64.b64decode(ori_cmd[pws_idx + idx + 1]).replace(b"\x00", b"")
-                    break
-                elif re.match(PWR_CMD_RE, part.encode()):
-                    ps1_cmd = ori_cmd[pws_idx + idx + 1].encode()
-                    break
-
-            if ps1_cmd:
-                sha256hash = hashlib.sha256(ps1_cmd).hexdigest()
-                for _, extracted_file_hash in extracted_files.get("powershell", []):
-                    if sha256hash == extracted_file_hash:
-                        return
-                powershell_filename = f"{sha256hash[0:10]}.ps1"
-                powershell_file_path = os.path.join(working_directory, powershell_filename)
-                with open(powershell_file_path, "wb") as f:
-                    f.write(ps1_cmd)
-                extracted_files["powershell"].append((powershell_filename, sha256hash))
-
     def analyze_logical_line(self, logical_line, working_directory, f, extracted_files):
         commands = self.get_commands(logical_line)
         for command in commands:
             normalized_comm = self.normalize_command(command)
             if len(list(self.get_commands(normalized_comm))) > 1:
-                self.traits["command-grouping"].append({"Command": command[:100], "Normalized": normalized_comm[:100]})
+                self.traits["command-grouping"].append({"Command": command, "Normalized": normalized_comm})
                 self.analyze_logical_line(normalized_comm, working_directory, f, extracted_files)
             else:
                 self.interpret_command(normalized_comm)
@@ -644,8 +646,7 @@ class BatchDeobfuscator:
                 f.write("\n")
                 for lolbas in RARE_LOLBAS:
                     if lolbas in normalized_comm:
-                        self.traits["LOLBAS"].append({"LOLBAS": lolbas, "Command": normalized_comm[:100]})
-                self.search_for_powershell(normalized_comm, working_directory, extracted_files)
+                        self.traits["LOLBAS"].append({"LOLBAS": lolbas, "Command": normalized_comm})
                 if len(self.exec_cmd) > 0:
                     for child_cmd in self.exec_cmd:
                         child_deobfuscator = copy.deepcopy(self)
@@ -661,6 +662,20 @@ class BatchDeobfuscator:
                         shutil.move(child_path, os.path.join(working_directory, bat_filename))
                         extracted_files["batch"].append((bat_filename, sha256hash))
                     self.exec_cmd.clear()
+                if len(self.exec_ps1) > 0:
+                    for child_ps1 in self.exec_ps1:
+                        sha256hash = hashlib.sha256(child_ps1).hexdigest()
+                        if any(
+                            extracted_file_hash == sha256hash
+                            for _, extracted_file_hash in extracted_files.get("powershell", [])
+                        ):
+                            continue
+                        powershell_filename = f"{sha256hash[0:10]}.ps1"
+                        powershell_file_path = os.path.join(working_directory, powershell_filename)
+                        with open(powershell_file_path, "wb") as ps1_f:
+                            ps1_f.write(child_ps1)
+                        extracted_files["powershell"].append((powershell_filename, sha256hash))
+                    self.exec_ps1.clear()
 
     def analyze(self, file_path, working_directory):
         extracted_files = defaultdict(lambda: list())

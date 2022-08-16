@@ -483,3 +483,71 @@ class TestUnittests:
         deobfuscator = BatchDeobfuscator()
         cmd = deobfuscator.normalize_command('cmd /C "pow""ershell -e ZQBjAGgAbwAgACIAVwBpAHoAYQByAGQAIgA="')
         assert cmd == 'cmd /C "powershell -e ZQBjAGgAbwAgACIAVwBpAHoAYQByAGQAIgA="'
+
+    @staticmethod
+    @pytest.mark.parametrize(
+        "cmd, exec_cmd",
+        [
+            ('start /b cmd /c "echo Hi"', ["echo Hi"]),
+            ('start /b /i cmd /c "echo Hi"', ["echo Hi"]),
+            ('start /w cmd /c "echo Hi"', ["echo Hi"]),
+            ('start/B /WAIT cmd /c "echo Hi"', ["echo Hi"]),
+            ('start/WAIT /B cmd /c "echo Hi"', ["echo Hi"]),
+        ],
+    )
+    def test_interpret_start(cmd, exec_cmd):
+        deobfuscator = BatchDeobfuscator()
+        deobfuscator.interpret_command(cmd)
+        assert len(deobfuscator.exec_cmd) == len(exec_cmd)
+        for d_e_cmd, e_cmd in zip(deobfuscator.exec_cmd, exec_cmd):
+            assert d_e_cmd == e_cmd
+
+    @staticmethod
+    def test_posix_powershell():
+        deobfuscator = BatchDeobfuscator()
+        cmd = (
+            "powershell -Command \"$out = cat '%USERPROFILE%\\jin\\config.json' | "
+            "%%{$_ -replace '\\\"donate-level\\\": *\\d*,', '\\\"donate-level\\\": 1,'} | "
+            "Out-String; $out | Out-File -Encoding ASCII '%USERPROFILE%\\jin\\config.json'\" "
+        )
+        deobfuscator.interpret_command(cmd)
+        assert len(deobfuscator.exec_ps1) == 1
+        assert deobfuscator.exec_ps1[0] == (
+            b"$out = cat '%USERPROFILE%\\jin\\config.json' | "
+            b"%%{$_ -replace '\"donate-level\": *\\d*,', '\"donate-level\": 1,'} | "
+            b"Out-String; $out | Out-File -Encoding ASCII '%USERPROFILE%\\jin\\config.json'"
+        )
+        deobfuscator.exec_ps1.clear()
+
+        cmd = (
+            'powershell -noprofile -command "&{start-process powershell -ArgumentList'
+            ' \'-noprofile -file \\"%scriptPath%\\"\' -verb RunAs}"'
+        )
+        deobfuscator.interpret_command(cmd)
+        assert len(deobfuscator.exec_ps1) == 1
+        assert (
+            deobfuscator.exec_ps1[0]
+            == b"&{start-process powershell -ArgumentList '-noprofile -file \"%scriptPath%\"' -verb RunAs}"
+        )
+
+    @staticmethod
+    @pytest.mark.skip()
+    def test_non_posix_powershell():
+        deobfuscator = BatchDeobfuscator()
+
+        # TODO: Find out how to parse this as non-posix with shlex without breaking all other cases
+        # What to do with odd number of quotes. Shlex doesn't parse it perfectly.
+        cmd = (
+            'powershell -Command "Get-AppxPackage -Name "Microsoft.OneDriveSync" > '
+            '"%WORKINGDIRONEDRIVE%\\OneDriveSparsePackage.txt" 2>&1'
+        )
+        deobfuscator.interpret_command(cmd)
+        assert len(deobfuscator.exec_ps1) == 1
+        # assert deobfuscator.exec_ps1[0] == "Good command (with or without redirection)"
+        deobfuscator.exec_ps1.clear()
+
+        # TODO: Found out how to keep the \ from this command and keep posix style commands working
+        cmd = r"PowerShell -NoProfile -ExecutionPolicy Bypass -Command C:\ProgramData\x64\ISO\x64.ps1"
+        deobfuscator.interpret_command(cmd)
+        assert len(deobfuscator.exec_ps1) == 1
+        assert deobfuscator.exec_ps1[0] == rb"C:\ProgramData\x64\ISO\x64.ps1"
