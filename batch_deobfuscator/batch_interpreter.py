@@ -47,7 +47,7 @@ class BatchDeobfuscator:
         self.variables = {}
         self.exec_cmd = []
         self.exec_ps1 = []
-        self.traits = defaultdict(lambda: list())
+        self.traits = defaultdict(list)
         self.complex_one_liner_threshold = complex_one_liner_threshold
         if os.name == "nt":
             for env_var, value in os.environ.items():
@@ -656,8 +656,8 @@ class BatchDeobfuscator:
                             child_deobfuscator.analyze_logical_line(
                                 child_cmd, working_directory, child_f, extracted_files
                             )
-                        with open(child_path, "rb") as f:
-                            sha256hash = hashlib.sha256(f.read()).hexdigest()
+                        with open(child_path, "rb") as cmd_f:
+                            sha256hash = hashlib.sha256(cmd_f.read()).hexdigest()
                         bat_filename = f"{sha256hash[0:10]}.bat"
                         shutil.move(child_path, os.path.join(working_directory, bat_filename))
                         extracted_files["batch"].append((bat_filename, sha256hash))
@@ -678,7 +678,7 @@ class BatchDeobfuscator:
                     self.exec_ps1.clear()
 
     def analyze(self, file_path, working_directory):
-        extracted_files = defaultdict(lambda: list())
+        extracted_files = defaultdict(list)
 
         file_name = "deobfuscated_bat.bat"
         temp_path = os.path.join(working_directory, file_name)
