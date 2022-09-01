@@ -155,7 +155,7 @@ class TestUnittests:
         # With EnableDelayedExpansion OFF, we keep the ! at the end
         deobfuscator = BatchDeobfuscator()
         logical_line = 'ec%a%ho "Fi%b%nd Ev%c%il!"'
-        expected = 'echo "Find Evil!"'
+        expected = 'echo "Find Evil"'
         normalized_comm = deobfuscator.normalize_command(logical_line)
         assert expected == normalized_comm
 

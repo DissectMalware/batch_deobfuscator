@@ -270,7 +270,7 @@ class BatchDeobfuscator:
                         value = f"{s2}{value[value.lower().index(s1[1:].lower())+len(s1)-1:]}"
                     else:
                         pattern = re.compile(re.escape(s1), re.IGNORECASE)
-                        value = pattern.sub(s2, value)
+                        value = pattern.sub(re.escape(s2), value)
             else:
                 # It should be "variable", and interpret the empty echo later, but that would need a better simulator
                 return value
@@ -370,6 +370,8 @@ class BatchDeobfuscator:
         return (var_name, var_value)
 
     def interpret_curl(self, cmd):
+        # Batch specific obfuscation that is not handled before for echo/variable purposes, can be stripped here
+        cmd = cmd.replace('""', "")
         split_cmd = shlex.split(cmd, posix=False)
         args, unknown = self.curl_parser.parse_known_args(split_cmd[1:])
 
@@ -454,6 +456,10 @@ class BatchDeobfuscator:
             match = re.search(cmd_command, normalized_comm, re.IGNORECASE)
             if match is not None and match.group("cmd") is not None:
                 self.exec_cmd.append(match.group("cmd").strip('"'))
+            return
+
+        if normalized_comm_lower.startswith("setlocal"):
+            # Just so we don't go into the set command
             return
 
         if normalized_comm_lower.startswith("set"):
@@ -543,19 +549,31 @@ class BatchDeobfuscator:
                 elif char == "%":  # Two % in a row
                     normalized_com += char
                     state = stack.pop()
-                elif char == '"':
-                    if stack[-1] == "str_s":
-                        normalized_com += char
-                        stack.pop()
-                        state = "init"
-                    else:
-                        normalized_com += char
                 elif char == "^":
                     # Do not escape in vars?
                     # state = "escape"
                     # stack.append("var_s")
                     normalized_com += char
-                elif char.isdigit() and len(normalized_com) == variable_start + 1:
+                elif char == "*" and len(normalized_com) == variable_start + 1:
+                    # Assume no parameter were passed
+                    normalized_com = normalized_com[:variable_start]
+                    state = stack.pop()
+                elif char.isdigit() and normalized_com[variable_start:] in [
+                    "%",
+                    "%~",
+                    "%~f",
+                    "%~d",
+                    "%~p",
+                    "%~n",
+                    "%~x",
+                    "%~s",
+                    "%~a",
+                    "%~t",
+                    "%~z",
+                ]:
+                    # https://www.programming-books.io/essential/batch/-percent-tilde-f4263820c2db41e399c77259970464f1.html
+                    # TODO: Better handling of letter combination (i.e. %~xsa0)
+                    # Could also return different values of script.bat if we want to parse the options
                     normalized_com += char
                     if char == "0":
                         value = "script.bat"
@@ -578,13 +596,6 @@ class BatchDeobfuscator:
                     state = stack.pop()
                 elif char == "!":
                     normalized_com += char
-                elif char == '"':
-                    if stack[-1] == "str_s":
-                        normalized_com += char
-                        stack.pop()
-                        state = "init"
-                    else:
-                        normalized_com += char
                 elif char == "^":
                     state = "escape"
                     stack.append("var_s_2")
